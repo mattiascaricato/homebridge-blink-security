@@ -73,6 +73,8 @@ async function makeArmedBlink(
     getAccountHomescreen: vi.fn(async () => structuredClone(homescreen)),
     getMediaChange: vi.fn(async () => ({ media: structuredClone(media) })),
     probeDoorbellConfig: vi.fn().mockResolvedValue(undefined),
+    enableCameraMotion: vi.fn().mockResolvedValue(undefined),
+    disableCameraMotion: vi.fn().mockResolvedValue(undefined),
     lock: vi.fn((_name: string, fn: () => Promise<unknown>) => fn()),
     command: vi.fn((_networkID: number, fn: () => Promise<unknown>) => fn()),
   };
@@ -178,5 +180,72 @@ describe('motion selection ignores non-motion media sources', () => {
     doorbell.onPress = onPress;
     await expect(doorbell.checkForPress()).resolves.toBe(true);
     expect(onPress).toHaveBeenCalledOnce();
+  });
+});
+
+// Real case, 2026-10-21: a Home automation turned the Room camera off at
+// 23:00 (camera disable endpoint), the system was armed at 00:00, and at
+// 00:14 Blink still recorded a cv_motion clip for Room. The plugin fired
+// motion and HomeKit's security system went to triggered. A camera that is
+// off in HomeKit must never fire motion, whatever Blink records.
+describe('motion is suppressed while the camera is off', () => {
+  it('does not fire after HomeKit turned the camera off, even if Blink still reports it enabled', async () => {
+    const blink = await makeArmedBlink([
+      mediaEntry({ source: 'cv_motion', created_at: secondsAgo(5) }),
+    ]);
+    const camera = blink.cameras.get(42)!;
+    await camera.setEnabled(false);
+    expect(blink.api.disableCameraMotion).toHaveBeenCalledWith(100, 42);
+    // The homescreen stub keeps reporting enabled: true after the command.
+    expect(camera.enabled).toBe(true);
+    await expect(camera.getMotionDetected()).resolves.toBe(false);
+    expect(blink.log.debug).toHaveBeenCalledWith(
+      'Blink Patio motion: suppressed: camera off'
+    );
+  });
+
+  it('does not fire when Blink reports the camera disabled', async () => {
+    const blink = await makeArmedBlink(
+      [mediaEntry({ source: 'cv_motion', created_at: secondsAgo(5) })],
+      { cameras: [{ ...makeDevice('catalina'), enabled: false }] }
+    );
+    await expect(blink.cameras.get(42)!.getMotionDetected()).resolves.toBe(
+      false
+    );
+  });
+
+  it('fires again once HomeKit turns the camera back on', async () => {
+    const blink = await makeArmedBlink([
+      mediaEntry({ source: 'cv_motion', created_at: secondsAgo(5) }),
+    ]);
+    const camera = blink.cameras.get(42)!;
+    await camera.setEnabled(false);
+    // Blink already reports enabled, so no API call is sent; the HomeKit
+    // state must still be cleared.
+    await camera.setEnabled(true);
+    await expect(camera.getMotionDetected()).resolves.toBe(true);
+  });
+
+  it('fires as before for a camera never set from HomeKit', async () => {
+    const blink = await makeArmedBlink([
+      mediaEntry({ source: 'cv_motion', created_at: secondsAgo(5) }),
+    ]);
+    await expect(blink.cameras.get(42)!.getMotionDetected()).resolves.toBe(
+      true
+    );
+  });
+
+  it('logs Blink enabled flag changes once per transition', async () => {
+    const blink = await makeArmedBlink([]);
+    const camera = blink.cameras.get(42)!;
+    const debug = vi.mocked(blink.log.debug);
+    const line = 'Blink Patio enabled (Blink): true -> false';
+    camera.data = { ...camera.data, enabled: false };
+    camera.data = { ...camera.data, enabled: false };
+    expect(debug.mock.calls.filter(([msg]) => msg === line)).toHaveLength(1);
+    camera.data = { ...camera.data, enabled: true };
+    expect(debug).toHaveBeenCalledWith(
+      'Blink Patio enabled (Blink): false -> true'
+    );
   });
 });

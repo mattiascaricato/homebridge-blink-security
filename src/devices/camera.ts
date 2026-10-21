@@ -33,6 +33,9 @@ export class BlinkCamera extends BlinkDevice {
   // The newest image actually served, kept apart from the per-URL cache so
   // clearing that cache (after a live view) never leaves nothing to show.
   private lastGoodThumbnail?: Buffer;
+  // The enabled state HomeKit last set, undefined until HomeKit sets one.
+  // In memory only: after a restart, Blink's own flag is all that is left.
+  private homeKitEnabled?: boolean;
 
   constructor(data: HomescreenCamera, blink: Blink, isOwlDevice = false) {
     super(data);
@@ -46,6 +49,14 @@ export class BlinkCamera extends BlinkDevice {
   }
 
   override set data(newInfo: HomescreenCamera) {
+    // Transitions only, so the log shows whether Blink re-enables a camera
+    // HomeKit turned off (for instance when the system is armed).
+    const previous = this.data?.enabled;
+    if (previous !== newInfo.enabled) {
+      this.blink.log.debug(
+        `${this.name} enabled (Blink): ${previous} -> ${newInfo.enabled}`
+      );
+    }
     this._data = newInfo;
     if (this._context) {
       this._context.data = this._data;
@@ -164,6 +175,15 @@ export class BlinkCamera extends BlinkDevice {
   }
 
   async getMotionDetected(): Promise<boolean> {
+    // A camera that is off never fires, even when Blink records anyway: a
+    // clip from a camera HomeKit turned off once tripped the alarm while
+    // the homescreen still reported it enabled. Either side saying off is
+    // enough.
+    if (this.homeKitEnabled === false || this.data.enabled === false) {
+      this.traceMotion('suppressed: camera off');
+      return false;
+    }
+
     // A clip recorded while armed can surface after a disarm: recording
     // plus upload takes longer than a quick arm/trigger/disarm cycle, and
     // the Blink app still notifies for it. Disarming therefore only stops
@@ -253,6 +273,7 @@ export class BlinkCamera extends BlinkDevice {
   }
 
   async setEnabled(target = true): Promise<void> {
+    this.homeKitEnabled = Boolean(target);
     if (this.enabled !== Boolean(target)) {
       await this.blink.setCameraMotionSensorState(
         this.networkID,
