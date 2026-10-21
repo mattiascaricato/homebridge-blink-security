@@ -209,17 +209,21 @@ describe('motion is suppressed while the camera is off', () => {
     expect(camera.getEnabled()).toBe(false);
   });
 
-  it('keeps no override when turning the camera off fails', async () => {
+  // api.command swallows a failed command, so setEnabled only rejects when
+  // the refresh after the disable fails. Blink may have taken the disable,
+  // so the camera must stay off.
+  it('stays off when the refresh after turning it off fails', async () => {
     const blink = await makeArmedBlink([
       mediaEntry({ source: 'cv_motion', created_at: secondsAgo(5) }),
     ]);
-    vi.mocked(blink.api.disableCameraMotion).mockRejectedValueOnce(
-      new Error('boom')
+    vi.mocked(blink.api.getAccountHomescreen).mockRejectedValueOnce(
+      new Error('timeout')
     );
     const camera = blink.cameras.get(42)!;
-    await expect(camera.setEnabled(false)).rejects.toThrow('boom');
-    expect(camera.getEnabled()).toBe(true);
-    await expect(camera.getMotionDetected()).resolves.toBe(true);
+    await expect(camera.setEnabled(false)).rejects.toThrow('timeout');
+    expect(blink.api.disableCameraMotion).toHaveBeenCalledWith(100, 42);
+    expect(camera.getEnabled()).toBe(false);
+    await expect(camera.getMotionDetected()).resolves.toBe(false);
   });
 
   it('does not fire for a doorbell HomeKit turned off', async () => {

@@ -70,6 +70,7 @@ export class BlinkDoorbell extends BlinkCamera {
   }
 
   override async setEnabled(target = true): Promise<void> {
+    this.homeKitEnabled = Boolean(target);
     if (this.enabled !== Boolean(target)) {
       await this.blink.setDoorbellMotionSensorState(
         this.networkID,
@@ -77,7 +78,6 @@ export class BlinkDoorbell extends BlinkCamera {
         target
       );
     }
-    this.homeKitEnabled = Boolean(target);
   }
 
   async getLiveViewURL(timeout = 30): Promise<string | undefined> {

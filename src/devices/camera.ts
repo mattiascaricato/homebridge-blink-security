@@ -176,9 +176,9 @@ export class BlinkCamera extends BlinkDevice {
 
   async getMotionDetected(): Promise<boolean> {
     // A camera that is off never fires, even when Blink records anyway: a
-    // clip from a camera HomeKit turned off once tripped the alarm while
-    // the homescreen still reported it enabled. Either side saying off is
-    // enough.
+    // clip from a camera HomeKit had turned off once tripped the alarm.
+    // Blink may or may not still report such a camera enabled, so either
+    // side saying off is enough.
     if (this.homeKitEnabled === false || this.data.enabled === false) {
       this.traceMotion(
         'suppressed: camera off',
@@ -279,6 +279,10 @@ export class BlinkCamera extends BlinkDevice {
   }
 
   async setEnabled(target = true): Promise<void> {
+    // Recorded first: api.command swallows a failed command, so the only
+    // rejection here is the refresh after a disable Blink may have taken.
+    // The switch then reads off, which is what Home asked for.
+    this.homeKitEnabled = Boolean(target);
     if (this.enabled !== Boolean(target)) {
       await this.blink.setCameraMotionSensorState(
         this.networkID,
@@ -286,8 +290,6 @@ export class BlinkCamera extends BlinkDevice {
         target
       );
     }
-    // Recorded after the call, so a failed command leaves no override.
-    this.homeKitEnabled = Boolean(target);
   }
 
   get nightVision(): boolean {
