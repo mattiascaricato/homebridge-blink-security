@@ -35,7 +35,7 @@ export class BlinkCamera extends BlinkDevice {
   private lastGoodThumbnail?: Buffer;
   // The enabled state HomeKit last set, undefined until HomeKit sets one.
   // In memory only: after a restart, Blink's own flag is all that is left.
-  private homeKitEnabled?: boolean;
+  protected homeKitEnabled?: boolean;
 
   constructor(data: HomescreenCamera, blink: Blink, isOwlDevice = false) {
     super(data);
@@ -51,7 +51,7 @@ export class BlinkCamera extends BlinkDevice {
   override set data(newInfo: HomescreenCamera) {
     // Transitions only, so the log shows whether Blink re-enables a camera
     // HomeKit turned off (for instance when the system is armed).
-    const previous = this.data?.enabled;
+    const previous = this.data.enabled;
     if (previous !== newInfo.enabled) {
       this.blink.log.debug(
         `${this.name} enabled (Blink): ${previous} -> ${newInfo.enabled}`
@@ -180,7 +180,10 @@ export class BlinkCamera extends BlinkDevice {
     // the homescreen still reported it enabled. Either side saying off is
     // enough.
     if (this.homeKitEnabled === false || this.data.enabled === false) {
-      this.traceMotion('suppressed: camera off');
+      this.traceMotion(
+        'suppressed: camera off',
+        ` (HomeKit=${this.homeKitEnabled}, Blink=${this.data.enabled})`
+      );
       return false;
     }
 
@@ -268,12 +271,14 @@ export class BlinkCamera extends BlinkDevice {
     this.blink.log.debug(`${this.name} motion: ${key}${detail}`);
   }
 
+  // On only when motion can fire: a camera HomeKit turned off reads off
+  // even if Blink re-enables it, so Home never shows ON while motion is
+  // suppressed.
   getEnabled(): boolean {
-    return this.enabled;
+    return this.homeKitEnabled !== false && this.enabled;
   }
 
   async setEnabled(target = true): Promise<void> {
-    this.homeKitEnabled = Boolean(target);
     if (this.enabled !== Boolean(target)) {
       await this.blink.setCameraMotionSensorState(
         this.networkID,
@@ -281,6 +286,8 @@ export class BlinkCamera extends BlinkDevice {
         target
       );
     }
+    // Recorded after the call, so a failed command leaves no override.
+    this.homeKitEnabled = Boolean(target);
   }
 
   get nightVision(): boolean {

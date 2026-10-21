@@ -75,6 +75,8 @@ async function makeArmedBlink(
     probeDoorbellConfig: vi.fn().mockResolvedValue(undefined),
     enableCameraMotion: vi.fn().mockResolvedValue(undefined),
     disableCameraMotion: vi.fn().mockResolvedValue(undefined),
+    enableDoorbellMotion: vi.fn().mockResolvedValue(undefined),
+    disableDoorbellMotion: vi.fn().mockResolvedValue(undefined),
     lock: vi.fn((_name: string, fn: () => Promise<unknown>) => fn()),
     command: vi.fn((_networkID: number, fn: () => Promise<unknown>) => fn()),
   };
@@ -200,8 +202,42 @@ describe('motion is suppressed while the camera is off', () => {
     expect(camera.enabled).toBe(true);
     await expect(camera.getMotionDetected()).resolves.toBe(false);
     expect(blink.log.debug).toHaveBeenCalledWith(
-      'Blink Patio motion: suppressed: camera off'
+      'Blink Patio motion: suppressed: camera off (HomeKit=false, Blink=true)'
     );
+    // The switch shows the camera off, so Home never reads ON while motion
+    // is suppressed.
+    expect(camera.getEnabled()).toBe(false);
+  });
+
+  it('keeps no override when turning the camera off fails', async () => {
+    const blink = await makeArmedBlink([
+      mediaEntry({ source: 'cv_motion', created_at: secondsAgo(5) }),
+    ]);
+    vi.mocked(blink.api.disableCameraMotion).mockRejectedValueOnce(
+      new Error('boom')
+    );
+    const camera = blink.cameras.get(42)!;
+    await expect(camera.setEnabled(false)).rejects.toThrow('boom');
+    expect(camera.getEnabled()).toBe(true);
+    await expect(camera.getMotionDetected()).resolves.toBe(true);
+  });
+
+  it('does not fire for a doorbell HomeKit turned off', async () => {
+    const blink = await makeArmedBlink(
+      [
+        mediaEntry({
+          device: 'lotus',
+          source: 'cv_motion',
+          created_at: secondsAgo(5),
+        }),
+      ],
+      { doorbells: [makeDevice('lotus')] }
+    );
+    const doorbell = blink.doorbells.get(42)!;
+    await expect(doorbell.getMotionDetected()).resolves.toBe(true);
+    await doorbell.setEnabled(false);
+    expect(blink.api.disableDoorbellMotion).toHaveBeenCalledWith(100, 42);
+    await expect(doorbell.getMotionDetected()).resolves.toBe(false);
   });
 
   it('does not fire when Blink reports the camera disabled', async () => {

@@ -77,6 +77,7 @@ export class BlinkDoorbell extends BlinkCamera {
         target
       );
     }
+    this.homeKitEnabled = Boolean(target);
   }
 
   async getLiveViewURL(timeout = 30): Promise<string | undefined> {
